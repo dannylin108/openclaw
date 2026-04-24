@@ -22,6 +22,7 @@ env:
   PNPM_VERSION: "10.33.0"
   PACKAGE_SCOPE: "@dannylin108"
   PACKAGE_NAME: "@dannylin108/openclaw"
+  PACKAGE_TAG: "webhook-fix"
   REGISTRY_URL: "https://npm.pkg.github.com"
 
 jobs:
@@ -49,11 +50,18 @@ jobs:
           scope: "@dannylin108"
 
       - name: Rewrite package metadata for GitHub Packages
+        env:
+          GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
+          GITHUB_RUN_NUMBER: ${{ github.run_number }}
         run: |
           node <<'NODE'
           const fs = require("node:fs");
           const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+          const baseVersion = pkg.version;
+          const runNumber = process.env.GITHUB_RUN_NUMBER;
+          const runAttempt = process.env.GITHUB_RUN_ATTEMPT;
           pkg.name = "@dannylin108/openclaw";
+          pkg.version = `${baseVersion}-webhookfix.${runNumber}.${runAttempt}`;
           pkg.homepage = "https://github.com/dannylin108/openclaw/tree/release/webhook-session-fix#readme";
           pkg.bugs = { url: "https://github.com/dannylin108/openclaw/issues" };
           pkg.repository = {
@@ -122,4 +130,4 @@ jobs:
       - name: Publish to GitHub Packages
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npm publish "./${{ steps.pack.outputs.file }}" --registry="${REGISTRY_URL}"
+        run: npm publish "./${{ steps.pack.outputs.file }}" --tag "${PACKAGE_TAG}" --registry="${REGISTRY_URL}"
