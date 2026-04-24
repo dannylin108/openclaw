@@ -1,12 +1,15 @@
 name: OpenClaw GitHub Packages Release
 
 on:
+  push:
+    branches:
+      - release/webhook-session-fix
   workflow_dispatch:
     inputs:
       ref:
         description: Branch, tag, or commit to publish
         required: true
-        default: codex/fix-stale-issue-in-forked-repo
+        default: release/webhook-session-fix
         type: string
 
 permissions:
@@ -28,7 +31,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
         with:
-          ref: ${{ inputs.ref }}
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || github.ref }}
           fetch-depth: 0
 
       - name: Setup Node environment
@@ -51,7 +54,7 @@ jobs:
           const fs = require("node:fs");
           const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
           pkg.name = "@dannylin108/openclaw";
-          pkg.homepage = "https://github.com/dannylin108/openclaw/tree/codex/fix-stale-issue-in-forked-repo#readme";
+          pkg.homepage = "https://github.com/dannylin108/openclaw/tree/release/webhook-session-fix#readme";
           pkg.bugs = { url: "https://github.com/dannylin108/openclaw/issues" };
           pkg.repository = {
             type: "git",
