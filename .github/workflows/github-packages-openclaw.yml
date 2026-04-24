@@ -1,4 +1,4 @@
-name: OpenClaw GitHub Packages Release
+name: OpenClaw Tarball Release
 
 on:
   push:
@@ -14,20 +14,15 @@ on:
 
 permissions:
   contents: read
-  packages: write
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
   NODE_VERSION: "24.x"
   PNPM_VERSION: "10.33.0"
-  PACKAGE_SCOPE: "@dannylin108"
-  PACKAGE_NAME: "@dannylin108/openclaw"
-  PACKAGE_TAG: "webhook-fix"
-  REGISTRY_URL: "https://npm.pkg.github.com"
   npm_config_cache: /tmp/npm-cache
 
 jobs:
-  publish_github_package:
+  build_tarball:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -43,14 +38,7 @@ jobs:
           pnpm-version: ${{ env.PNPM_VERSION }}
           install-bun: "true"
 
-      - name: Setup GitHub Packages auth
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          registry-url: ${{ env.REGISTRY_URL }}
-          scope: "@dannylin108"
-
-      - name: Rewrite package metadata for GitHub Packages
+      - name: Rewrite prerelease version
         env:
           GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
           GITHUB_RUN_NUMBER: ${{ github.run_number }}
@@ -61,29 +49,12 @@ jobs:
           const baseVersion = pkg.version;
           const runNumber = process.env.GITHUB_RUN_NUMBER;
           const runAttempt = process.env.GITHUB_RUN_ATTEMPT;
-          pkg.name = "@dannylin108/openclaw";
           pkg.version = `${baseVersion}-webhookfix.${runNumber}.${runAttempt}`;
-          pkg.homepage = "https://github.com/dannylin108/openclaw/tree/release/webhook-session-fix#readme";
-          pkg.bugs = { url: "https://github.com/dannylin108/openclaw/issues" };
-          pkg.repository = {
-            type: "git",
-            url: "git+https://github.com/dannylin108/openclaw.git",
-          };
-          pkg.publishConfig = { registry: "https://npm.pkg.github.com" };
           fs.writeFileSync("package.json", `${JSON.stringify(pkg, null, 2)}\n`);
           NODE
 
-      - name: Ensure version is not already published
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          PACKAGE_VERSION="$(node -p "require('./package.json').version")"
-          if npm view "${PACKAGE_NAME}@${PACKAGE_VERSION}" version --registry="${REGISTRY_URL}" >/dev/null 2>&1; then
-            echo "${PACKAGE_NAME}@${PACKAGE_VERSION} is already published."
-            exit 1
-          fi
-          echo "Publishing ${PACKAGE_NAME}@${PACKAGE_VERSION}"
+      - name: Show release version
+        run: node -p "require('./package.json').name + '@' + require('./package.json').version"
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -117,7 +88,9 @@ jobs:
           PACK_FILE="$(printf '%s' "$PACK_JSON" | node -e 'const fs=require("node:fs"); const input=fs.readFileSync(0,"utf8"); const parsed=JSON.parse(input); process.stdout.write(parsed[0].filename);')"
           echo "file=${PACK_FILE}" >> "$GITHUB_OUTPUT"
 
-      - name: Publish to GitHub Packages
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npm publish "./${{ steps.pack.outputs.file }}" --tag "${PACKAGE_TAG}" --registry="${REGISTRY_URL}"
+      - name: Upload tarball artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: openclaw-tarball
+          path: ./${{ steps.pack.outputs.file }}
+          if-no-files-found: error
