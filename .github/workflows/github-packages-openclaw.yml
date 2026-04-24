@@ -24,6 +24,7 @@ env:
   PACKAGE_NAME: "@dannylin108/openclaw"
   PACKAGE_TAG: "webhook-fix"
   REGISTRY_URL: "https://npm.pkg.github.com"
+  npm_config_cache: /tmp/npm-cache
 
 jobs:
   publish_github_package:
@@ -91,29 +92,18 @@ jobs:
         run: pnpm test src/cron/isolated-agent/run.skill-filter.test.ts src/cron/isolated-agent/session.test.ts
 
       - name: Build runtime assets
-        run: |
-          pnpm canvas:a2ui:bundle
-          node scripts/tsdown-build.mjs
-          pnpm ui:build
+        run: pnpm build
 
-      - name: Sanitize bundled plugin manifests
+      - name: Build Control UI
+        run: pnpm ui:build
+
+      - name: Verify bundled runtime smoke
+        run: node scripts/test-built-bundled-channel-entry-smoke.mjs
+
+      - name: Verify plugin manifests exist
         run: |
-          node <<'NODE'
-          const fs = require("node:fs");
-          const path = require("node:path");
-          const root = path.join(process.cwd(), "dist", "extensions");
-          if (!fs.existsSync(root)) process.exit(0);
-          for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
-            if (!entry.isDirectory() || entry.name === "node_modules") continue;
-            const manifest = path.join(root, entry.name, "package.json");
-            if (!fs.existsSync(manifest)) continue;
-            const pkg = JSON.parse(fs.readFileSync(manifest, "utf8"));
-            delete pkg.devDependencies;
-            delete pkg.peerDependencies;
-            delete pkg.peerDependenciesMeta;
-            fs.writeFileSync(manifest, `${JSON.stringify(pkg, null, 2)}\n`);
-          }
-          NODE
+          test -f dist/extensions/acpx/openclaw.plugin.json
+          test -f dist/extensions/active-memory/openclaw.plugin.json
 
       - name: Write dist inventory
         run: node --import tsx scripts/write-package-dist-inventory.ts
