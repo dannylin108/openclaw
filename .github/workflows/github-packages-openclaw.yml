@@ -1,0 +1,122 @@
+name: OpenClaw GitHub Packages Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Branch, tag, or commit to publish
+        required: true
+        default: codex/fix-stale-issue-in-forked-repo
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  NODE_VERSION: "24.x"
+  PNPM_VERSION: "10.33.0"
+  PACKAGE_SCOPE: "@dannylin108"
+  PACKAGE_NAME: "@dannylin108/openclaw"
+  REGISTRY_URL: "https://npm.pkg.github.com"
+
+jobs:
+  publish_github_package:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
+
+      - name: Setup Node environment
+        uses: ./.github/actions/setup-node-env
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          pnpm-version: ${{ env.PNPM_VERSION }}
+          install-bun: "true"
+
+      - name: Setup GitHub Packages auth
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          registry-url: ${{ env.REGISTRY_URL }}
+          scope: "@dannylin108"
+
+      - name: Rewrite package metadata for GitHub Packages
+        run: |
+          node <<'NODE'
+          const fs = require("node:fs");
+          const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+          pkg.name = "@dannylin108/openclaw";
+          pkg.homepage = "https://github.com/dannylin108/openclaw/tree/codex/fix-stale-issue-in-forked-repo#readme";
+          pkg.bugs = { url: "https://github.com/dannylin108/openclaw/issues" };
+          pkg.repository = {
+            type: "git",
+            url: "git+https://github.com/dannylin108/openclaw.git",
+          };
+          pkg.publishConfig = { registry: "https://npm.pkg.github.com" };
+          fs.writeFileSync("package.json", `${JSON.stringify(pkg, null, 2)}\n`);
+          NODE
+
+      - name: Ensure version is not already published
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          PACKAGE_VERSION="$(node -p "require('./package.json').version")"
+          if npm view "${PACKAGE_NAME}@${PACKAGE_VERSION}" version --registry="${REGISTRY_URL}" >/dev/null 2>&1; then
+            echo "${PACKAGE_NAME}@${PACKAGE_VERSION} is already published."
+            exit 1
+          fi
+          echo "Publishing ${PACKAGE_NAME}@${PACKAGE_VERSION}"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run regression tests
+        run: pnpm test src/cron/isolated-agent/run.skill-filter.test.ts src/cron/isolated-agent/session.test.ts
+
+      - name: Build runtime assets
+        run: |
+          pnpm canvas:a2ui:bundle
+          node scripts/tsdown-build.mjs
+          pnpm ui:build
+
+      - name: Sanitize bundled plugin manifests
+        run: |
+          node <<'NODE'
+          const fs = require("node:fs");
+          const path = require("node:path");
+          const root = path.join(process.cwd(), "dist", "extensions");
+          if (!fs.existsSync(root)) process.exit(0);
+          for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+            if (!entry.isDirectory() || entry.name === "node_modules") continue;
+            const manifest = path.join(root, entry.name, "package.json");
+            if (!fs.existsSync(manifest)) continue;
+            const pkg = JSON.parse(fs.readFileSync(manifest, "utf8"));
+            delete pkg.devDependencies;
+            delete pkg.peerDependencies;
+            delete pkg.peerDependenciesMeta;
+            fs.writeFileSync(manifest, `${JSON.stringify(pkg, null, 2)}\n`);
+          }
+          NODE
+
+      - name: Write dist inventory
+        run: node --import tsx scripts/write-package-dist-inventory.ts
+
+      - name: Pack tarball
+        id: pack
+        run: |
+          set -euo pipefail
+          PACK_JSON="$(npm pack --json --ignore-scripts)"
+          printf '%s\n' "$PACK_JSON"
+          PACK_FILE="$(printf '%s' "$PACK_JSON" | node -e 'const fs=require("node:fs"); const input=fs.readFileSync(0,"utf8"); const parsed=JSON.parse(input); process.stdout.write(parsed[0].filename);')"
+          echo "file=${PACK_FILE}" >> "$GITHUB_OUTPUT"
+
+      - name: Publish to GitHub Packages
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm publish "./${{ steps.pack.outputs.file }}" --registry="${REGISTRY_URL}"
